@@ -1,7 +1,9 @@
 use byteorder::BigEndian;
 use byteorder::ReadBytesExt;
+use flate2::read::GzDecoder;
 use std::collections::HashMap;
 use std::fs;
+use std::io::prelude::*;
 
 #[derive(Debug)]
 pub struct Description {
@@ -110,6 +112,13 @@ impl Index {
             return None;
         }
 
+        // format:
+        // word_str;  // a utf-8 string terminated by '\0'.
+        // word_data_offset;  // word data's offset in .dict file
+        // word_data_size;  // word data's total size in .dict file
+
+        // 1. word_str;  // a utf-8 string terminated by '\0'.
+        // we don't need this '\0'
         // word end with '0'
         let mut empty_tag = self.offset;
         loop {
@@ -134,6 +143,7 @@ impl Index {
         // jump over this '00'
         self.offset = empty_tag + 1;
 
+        // 2. word_data_offset;  // word data's offset in .dict file
         if self.index_bits == 64u32 {
             let mut tmp = &self.content[self.offset..self.offset + 8];
             let num = tmp.read_u64::<BigEndian>().unwrap();
@@ -141,6 +151,7 @@ impl Index {
             self.offset += 8;
             new_word.offset = num as u32;
         } else {
+            // u32
             let mut tmp = &self.content[self.offset..self.offset + 4];
             let num = tmp.read_u32::<BigEndian>().unwrap();
 
@@ -148,14 +159,21 @@ impl Index {
             new_word.offset = num;
         }
 
+        // word_data_size;  // word data's total size in .dict file
+        // word_data_size should be 32-bits unsigned number in network byte order.
+        // unlike word_data_offset it is *always* uint32
+
         let mut tmp = &self.content[self.offset..self.offset + 4];
         let num = tmp.read_u32::<BigEndian>().unwrap();
+
         self.offset += 4;
+
         new_word.size = num;
 
         new_word.index = self.index;
         self.index += 1;
 
+        // FIXME: copy to word to save in lst and dict
         let new2 = Word {
             w: new_word.w.clone(),
             offset: new_word.offset,
@@ -174,6 +192,33 @@ impl Index {
         Some(ret)
     }
 }
+
+pub struct Dictionary {
+    pub info: Description,
+    pub index: Index,
+    pub content: Vec<u8>,
+    pub offset: usize,
+}
+
+fn new_dictionary(info_path: &str, idx_path: &str, dict_path: &str) -> Dictionary {
+    let raw_zip = fs::read(dict_path).unwrap();
+    let raw_zip = fs::read_to_string(dict_path).unwrap();
+    let mut d = GzDecoder::new(raw_zip.as_bytes());
+    let mut s = String::new();
+    d.read_to_string(&mut s).unwrap();
+    println!("here");
+
+    let d: Dictionary = Dictionary {
+        info: new_description(info_path),
+        index: new_index(idx_path),
+        content: s.as_bytes().to_vec(),
+        offset: 0,
+    };
+
+    d
+}
+
+impl Dictionary {}
 
 #[cfg(test)]
 mod tests {
@@ -206,5 +251,14 @@ mod tests {
         if idx.word_lst.len() != 39429 {
             panic!("parse index fail");
         }
+    }
+
+    #[test]
+    fn test_dict() {
+        let _ = new_dictionary(
+            "./src/testdata/stardict-oxford-gb-2.4.2/oxford-gb.ifo",
+            "./src/testdata/stardict-oxford-gb-2.4.2/oxford-gb.idx",
+            "./src/testdata/stardict-oxford-gb-2.4.2/oxford-gb.dict.dz",
+        );
     }
 }
