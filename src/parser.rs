@@ -174,11 +174,10 @@ impl Index {
         self.index += 1;
 
         // FIXME: copy to word to save in lst and dict
+        // a new trick to copy struct field: https://doc.rust-lang.org/book/ch05-01-defining-structs.html#creating-instances-from-other-instances-with-struct-update-syntax
         let new2 = Word {
             w: new_word.w.clone(),
-            offset: new_word.offset,
-            size: new_word.size,
-            index: new_word.index,
+            ..new_word
         };
         let ret = new_word.w.clone();
 
@@ -202,23 +201,26 @@ pub struct Dictionary {
 
 fn new_dictionary(info_path: &str, idx_path: &str, dict_path: &str) -> Dictionary {
     let raw_zip = fs::read(dict_path).unwrap();
-    let raw_zip = fs::read_to_string(dict_path).unwrap();
-    let mut d = GzDecoder::new(raw_zip.as_bytes());
+    // Vec[u8] ==> bytes array
+    let mut d = GzDecoder::new(&raw_zip[..]);
     let mut s = String::new();
     d.read_to_string(&mut s).unwrap();
-    println!("here");
 
     let d: Dictionary = Dictionary {
         info: new_description(info_path),
         index: new_index(idx_path),
-        content: s.as_bytes().to_vec(),
+        content: s.into_bytes(),
         offset: 0,
     };
 
     d
 }
 
-impl Dictionary {}
+impl Dictionary {
+    pub fn is_same_type_sequence(&self) -> bool {
+        self.info.dict.contains_key("sametypesequence")
+    }
+}
 
 #[cfg(test)]
 mod tests {
