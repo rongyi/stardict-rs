@@ -284,6 +284,43 @@ impl Dictionary {
 
         ret
     }
+    pub fn get_word_non_same_sequence(&mut self, w: &Word) -> HashMap<u8, Vec<u8>> {
+        let mut ret: HashMap<u8, Vec<u8>> = HashMap::new();
+
+        let mut read_size: usize = 0;
+        let start_offset = self.offset;
+
+        while read_size < w.size {
+            let type_byte: u8 = self.content[self.offset];
+            let type_char: char = type_byte as char;
+            // jump over the type byte
+            self.offset += 1;
+
+            if type_char.is_lowercase() {
+                let end: size = self.offset;
+                loop {
+                    if end == 0x0 {
+                        break;
+                    }
+                    end += 1
+                }
+                let value = &self.content[self.offset..end];
+                ret.insert(type_byte, value.to_vec());
+
+                self.offset = end + 1;
+            } else {
+                let mut tmp = &self.content[self.offset..self.offset + 4];
+                let num = tmp.read_u32::<BigEndian>().unwrap();
+                self.offset += 4;
+
+                ret.insert(type_byte, self.get_entry_field_size(num as usize));
+            }
+
+            read_size = self.offset - start_offset;
+        }
+
+        ret
+    }
 }
 
 #[cfg(test)]
