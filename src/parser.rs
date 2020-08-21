@@ -236,6 +236,9 @@ impl Dictionary {
         for (i, c) in sametypesequence.chars().enumerate() {
             match c {
                 'W' | 'P' => {
+                    //     |----------------- size -----------------------|
+                    //     |                            |
+                    // startOffset                    offset
                     if i == sametypesequence.len() - 1 {
                         ret.insert(
                             c as u8,
@@ -253,6 +256,7 @@ impl Dictionary {
                 }
                 // "mlgtxykwhnr"
                 _ => {
+                    // just like 'W' 'P'
                     if i == sametypesequence.len() - 1 {
                         ret.insert(
                             c as u8,
