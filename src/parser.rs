@@ -42,6 +42,12 @@ pub fn new_description(info: &str) -> Description {
     }
 }
 
+impl Description {
+    pub fn is_same_type_sequence(&self) -> bool {
+        self.dict.contains_key("sametypesequence")
+    }
+}
+
 impl ToString for Description {
     fn to_string(&self) -> String {
         let mut ret: String = String::new();
@@ -91,6 +97,7 @@ pub fn new_index(path: &str) -> Index {
 
     ret
 }
+
 impl Index {
     fn parse(&mut self) {
         if self.parsed {
@@ -193,13 +200,11 @@ impl Index {
 }
 
 pub struct Dictionary {
-    pub info: Description,
-    pub index: Index,
     pub content: Vec<u8>,
     pub offset: usize,
 }
 
-fn new_dictionary(info_path: &str, idx_path: &str, dict_path: &str) -> Dictionary {
+fn new_dictionary(dict_path: &str) -> Dictionary {
     let raw_zip = fs::read(dict_path).unwrap();
     // Vec[u8] ==> bytes array
     let mut d = GzDecoder::new(&raw_zip[..]);
@@ -207,8 +212,6 @@ fn new_dictionary(info_path: &str, idx_path: &str, dict_path: &str) -> Dictionar
     d.read_to_string(&mut s).unwrap();
 
     let d: Dictionary = Dictionary {
-        info: new_description(info_path),
-        index: new_index(idx_path),
         content: s.into_bytes(),
         offset: 0,
     };
@@ -217,8 +220,65 @@ fn new_dictionary(info_path: &str, idx_path: &str, dict_path: &str) -> Dictionar
 }
 
 impl Dictionary {
-    pub fn is_same_type_sequence(&self) -> bool {
-        self.info.dict.contains_key("sametypesequence")
+    pub fn get_entry_field_size(&mut self, size: usize) -> Vec<u8> {
+        let value = &self.content[self.offset..self.offset + size];
+        self.offset += size;
+
+        value.to_vec()
+    }
+
+    pub fn get_word_same_sequence(&mut self, w: &Word, info: &Description) -> HashMap<u8, Vec<u8>> {
+        let mut ret: HashMap<u8, Vec<u8>> = HashMap::new();
+        let sametypesequence = info.dict.get("sametypesequence").unwrap();
+
+        let start_offset = self.offset;
+
+        for (i, c) in sametypesequence.chars().enumerate() {
+            match c {
+                'W' | 'P' => {
+                    if i == sametypesequence.len() - 1 {
+                        ret.insert(
+                            c as u8,
+                            self.get_entry_field_size(
+                                w.size as usize - (self.offset - start_offset),
+                            ),
+                        );
+                    } else {
+                        let mut tmp = &self.content[self.offset..self.offset + 4];
+                        let num = tmp.read_u32::<BigEndian>().unwrap();
+                        self.offset += 4;
+
+                        ret.insert(c as u8, self.get_entry_field_size(num as usize));
+                    }
+                }
+                // "mlgtxykwhnr"
+                _ => {
+                    if i == sametypesequence.len() - 1 {
+                        ret.insert(
+                            c as u8,
+                            self.get_entry_field_size(
+                                w.size as usize - (self.offset - start_offset),
+                            ),
+                        );
+                    } else {
+                        let mut empty = start_offset;
+                        loop {
+                            if empty == 0x0 {
+                                break;
+                            }
+                            empty += 1;
+                        }
+                        let value = &self.content[self.offset..empty];
+
+                        // jumper over the '\0'
+                        self.offset = empty + 1;
+                        ret.insert(c as u8, value.to_vec());
+                    }
+                }
+            }
+        }
+
+        ret
     }
 }
 
@@ -257,10 +317,6 @@ mod tests {
 
     #[test]
     fn test_dict() {
-        let _ = new_dictionary(
-            "./src/testdata/stardict-oxford-gb-2.4.2/oxford-gb.ifo",
-            "./src/testdata/stardict-oxford-gb-2.4.2/oxford-gb.idx",
-            "./src/testdata/stardict-oxford-gb-2.4.2/oxford-gb.dict.dz",
-        );
+        let _ = new_dictionary("./src/testdata/stardict-oxford-gb-2.4.2/oxford-gb.dict.dz");
     }
 }
