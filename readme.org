@@ -1,0 +1,2 @@
+* about
+  this is a rust version startdict parser, translated from golang version(github.com/rongyi/startdict), just for learning rust. :)
