@@ -2,66 +2,71 @@ use byteorder::BigEndian;
 use byteorder::ReadBytesExt;
 use flate2::read::GzDecoder;
 use std::collections::HashMap;
+use std::fmt;
 use std::fs;
+use std::fs::File;
 use std::io::prelude::*;
+use std::io::BufReader;
+
+const SAME_TYPE: &str = "sametypesequence";
 
 #[derive(Debug)]
 pub struct Description {
-    pub content: String,
     pub dict: HashMap<String, String>,
 }
 
-pub fn new_description(info: &str) -> Description {
-    let ct = fs::read_to_string(info).unwrap();
-    let mut lines: Vec<String> = Vec::new();
-    for line in ct.split("\n") {
-        lines.push(line.to_string());
-    }
-
-    let mut d: HashMap<String, String> = HashMap::new();
-
-    lines.iter().skip(1).for_each(|s| {
-        let mut kv: Vec<String> = Vec::new();
-
-        for w in s.split("=") {
-            kv.push(w.to_string());
-        }
-
-        if kv.len() != 2 {
-            return;
-        }
-
-        let k = kv[0].trim();
-        let v = kv[1].trim().to_string();
-        d.entry(k.to_string()).or_insert(v);
-    });
-
-    Description {
-        content: ct,
-        dict: d,
-    }
-}
-
 impl Description {
-    pub fn is_same_type_sequence(&self) -> bool {
-        self.dict.contains_key("sametypesequence")
-    }
-}
+    pub fn new(info: &str) -> Self {
+        let f = File::open(info).unwrap();
+        let reader = BufReader::new(f);
 
-impl ToString for Description {
-    fn to_string(&self) -> String {
-        let mut ret: String = String::new();
-        for (k, v) in self.dict.iter() {
-            let s = format!("{}=>{}", k, v);
-            ret.push_str(&s);
-            ret.push_str("\n");
+        let mut lines: Vec<String> = Vec::new();
+        for line in reader.lines() {
+            lines.push(line.unwrap().to_string());
         }
-        ret.push_str("\n");
 
-        ret
+        let mut d: HashMap<String, String> = HashMap::new();
+
+        lines.iter().skip(1).for_each(|s| {
+            let mut kv: Vec<String> = Vec::new();
+
+            for w in s.split("=") {
+                kv.push(w.to_string());
+            }
+
+            if kv.len() != 2 {
+                return;
+            }
+
+            let k = kv[0].trim();
+            let v = kv[1].trim().to_string();
+            d.entry(k.to_string()).or_insert(v);
+        });
+
+        Description { dict: d }
+    }
+
+    pub fn is_same_type_sequence(&self) -> bool {
+        self.dict.contains_key(SAME_TYPE)
     }
 }
 
+impl fmt::Display for Description {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Discription: {{")?;
+        for (k, v) in self.dict.iter() {
+            write!(f, "{} : {}", k, v)?;
+        }
+        write!(f, "}}")
+    }
+}
+
+// Word represent the dictionary unit: word
+// https://github.com/huzheng001/stardict-3/blob/master/dict/doc/StarDictFileFormat#L165
+// word_str;  // a utf-8 string terminated by '\0'.
+// word_data_offset;  // word data's offset in .dict file
+// word_data_size;  // word data's total size in .dict file
+#[derive(Debug, Clone)]
 pub struct Word {
     pub w: String,
     pub offset: u32,
@@ -80,25 +85,25 @@ pub struct Index {
     pub parsed: bool,
 }
 
-pub fn new_index(path: &str) -> Index {
-    let c = fs::read(path).unwrap();
-
-    let mut ret = Index {
-        offset: 0,
-        index: 0,
-        // stardict 2.4 version is hardcoded to 32
-        index_bits: 32,
-        word_lst: Vec::new(),
-        word_dict: HashMap::new(),
-        parsed: false,
-        content: c,
-    };
-    ret.parse();
-
-    ret
-}
-
 impl Index {
+    pub fn new(path: &str) -> Self {
+        let c = fs::read(path).unwrap();
+
+        let mut ret = Index {
+            offset: 0,
+            index: 0,
+            // stardict 2.4 version is hardcoded to 32
+            index_bits: 32,
+            word_lst: Vec::new(),
+            word_dict: HashMap::new(),
+            parsed: false,
+            content: c,
+        };
+        ret.parse();
+
+        ret
+    }
+
     fn parse(&mut self) {
         if self.parsed {
             return;
@@ -123,6 +128,7 @@ impl Index {
         // word_str;  // a utf-8 string terminated by '\0'.
         // word_data_offset;  // word data's offset in .dict file
         // word_data_size;  // word data's total size in .dict file
+        // note: one word may have mutltiple data chunk, so we hashmap: word -> [dict_chunk0, dict_chunk1...]
 
         // 1. word_str;  // a utf-8 string terminated by '\0'.
         // we don't need this '\0'
@@ -150,7 +156,7 @@ impl Index {
         // jump over this '00'
         self.offset = empty_tag + 1;
 
-        // 2. word_data_offset;  // word data's offset in .dict file
+        // 2. word_data_offset; word data's offset in .dict file
         if self.index_bits == 64u32 {
             let mut tmp = &self.content[self.offset..self.offset + 8];
             let num = tmp.read_u64::<BigEndian>().unwrap();
@@ -166,7 +172,7 @@ impl Index {
             new_word.offset = num;
         }
 
-        // word_data_size;  // word data's total size in .dict file
+        // 3. word_data_size;  word data's total size in .dict file
         // word_data_size should be 32-bits unsigned number in network byte order.
         // unlike word_data_offset it is *always* uint32
 
@@ -182,10 +188,7 @@ impl Index {
 
         // FIXME: copy to word to save in lst and dict
         // a new trick to copy struct field: https://doc.rust-lang.org/book/ch05-01-defining-structs.html#creating-instances-from-other-instances-with-struct-update-syntax
-        let new2 = Word {
-            w: new_word.w.clone(),
-            ..new_word
-        };
+        let new2 = new_word.clone();
         let ret = new_word.w.clone();
 
         self.word_lst.push(new_word);
@@ -204,22 +207,22 @@ pub struct Dictionary {
     pub offset: usize,
 }
 
-fn new_dictionary(dict_path: &str) -> Dictionary {
-    let raw_zip = fs::read(dict_path).unwrap();
-    // Vec[u8] ==> bytes array
-    let mut d = GzDecoder::new(&raw_zip[..]);
-    let mut s = String::new();
-    d.read_to_string(&mut s).unwrap();
-
-    let d: Dictionary = Dictionary {
-        content: s.into_bytes(),
-        offset: 0,
-    };
-
-    d
-}
-
 impl Dictionary {
+    pub fn new(dict_path: &str) -> Self {
+        let raw_zip = fs::read(dict_path).unwrap();
+        // Vec[u8] ==> bytes array
+        let mut d = GzDecoder::new(&raw_zip[..]);
+        let mut buf: Vec<u8> = Vec::new();
+        d.read_to_end(&mut buf).unwrap();
+
+        let d: Dictionary = Dictionary {
+            content: buf,
+            offset: 0,
+        };
+
+        d
+    }
+
     pub fn get_entry_field_size(&mut self, size: usize) -> Vec<u8> {
         let value = &self.content[self.offset..self.offset + size];
         self.offset += size;
@@ -290,14 +293,14 @@ impl Dictionary {
         let mut read_size: usize = 0;
         let start_offset = self.offset;
 
-        while read_size < w.size {
+        while read_size < w.size as usize {
             let type_byte: u8 = self.content[self.offset];
             let type_char: char = type_byte as char;
             // jump over the type byte
             self.offset += 1;
 
             if type_char.is_lowercase() {
-                let end: size = self.offset;
+                let mut end: usize = self.offset;
                 loop {
                     if end == 0x0 {
                         break;
@@ -321,6 +324,33 @@ impl Dictionary {
 
         ret
     }
+
+    pub fn get_word(
+        &mut self,
+        word: &str,
+        info: &Description,
+        idx: &Index,
+    ) -> Option<Vec<HashMap<u8, Vec<u8>>>> {
+        if !idx.word_dict.contains_key(word) {
+            return None;
+        }
+
+        let mut ret: Vec<HashMap<u8, Vec<u8>>> = Vec::new();
+
+        let idexs = idx.word_dict.get(word).unwrap();
+        for cur_word in idexs.iter() {
+            self.offset = cur_word.offset as usize;
+            if info.is_same_type_sequence() {
+                let cur_value = self.get_word_same_sequence(&cur_word, info);
+                ret.push(cur_value);
+            } else {
+                let cur_value = self.get_word_non_same_sequence(&cur_word);
+                ret.push(cur_value);
+            }
+        }
+
+        Some(ret)
+    }
 }
 
 #[cfg(test)]
@@ -329,35 +359,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_new() {
-        let d = new_description("./src/testdata/stardict-oxford-gb-2.4.2/oxford-gb.ifo");
+    fn test_description() {
+        let d = Description::new("./src/testdata/stardict-oxford-gb-2.4.2/oxford-gb.ifo");
         for (k, v) in d.dict.iter() {
             println!("{}==>{}", k, v);
         }
 
         println!("{:?}", d);
     }
-    #[test]
-    fn test_string() {
-        let d = new_description("./src/testdata/stardict-oxford-gb-2.4.2/oxford-gb.ifo");
-        let s = d.to_string();
-        println!("{}", s);
-    }
 
     #[test]
     fn test_new_index() {
-        let _ = new_index("./src/testdata/stardict-oxford-gb-2.4.2/oxford-gb.idx");
-    }
-    #[test]
-    fn test_parse() {
-        let idx = new_index("./src/testdata/stardict-oxford-gb-2.4.2/oxford-gb.idx");
-        if idx.word_lst.len() != 39429 {
-            panic!("parse index fail");
-        }
+        let _ = Index::new("./src/testdata/stardict-oxford-gb-2.4.2/oxford-gb.idx");
     }
 
     #[test]
     fn test_dict() {
-        let _ = new_dictionary("./src/testdata/stardict-oxford-gb-2.4.2/oxford-gb.dict.dz");
+        let mut bin = Dictionary::new("./src/testdata/stardict-oxford-gb-2.4.2/oxford-gb.dict.dz");
+        let des = Description::new("./src/testdata/stardict-oxford-gb-2.4.2/oxford-gb.ifo");
+        let idx = Index::new("./src/testdata/stardict-oxford-gb-2.4.2/oxford-gb.idx");
+
+        let meaning = bin.get_word(&"congratulation", &des, &idx);
+        match meaning {
+            None => panic!("should search a word named hello"),
+            Some(meanings) => {
+                for m in meanings.iter() {
+                    for (k, v) in m.iter() {
+                        println!("keytype {}", *k as char);
+                        println!("value string\n{}\n", std::str::from_utf8(&v).unwrap());
+                    }
+                }
+            }
+        }
     }
 }
