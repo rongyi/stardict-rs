@@ -68,5 +68,6 @@ mod test {
         let index = index.unwrap();
         let words = index.into_iter().collect::<Vec<Word>>();
         assert_eq!(words.len(), 39429);
+        println!("{:?}", words[15856]);
     }
 }
