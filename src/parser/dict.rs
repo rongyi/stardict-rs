@@ -25,6 +25,16 @@ impl<'a> Dictionary<'a> {
         })
     }
 
+    pub fn get_oxford(&mut self, offset: u64, sz: u64) -> Result<String, Box<dyn Error>> {
+        let dict = self.get(offset, sz)?;
+        let meaning: Vec<String> = dict
+            .iter()
+            .map(|(_, value)| String::from_utf8(value.clone()).unwrap())
+            .collect();
+
+        Ok(meaning.join("\n"))
+    }
+
     pub fn get(&mut self, offset: u64, sz: u64) -> Result<HashMap<char, Vec<u8>>, Box<dyn Error>> {
         self.data.set_position(offset);
         let mut ret = HashMap::new();

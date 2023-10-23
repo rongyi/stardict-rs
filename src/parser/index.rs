@@ -6,9 +6,9 @@ use std::io::{BufRead, Cursor, Read};
 
 #[derive(Debug)]
 pub struct Word {
-    word: String,
-    offset: u32,
-    sz: u32,
+    pub word: String,
+    pub offset: u32,
+    pub sz: u32,
 }
 
 #[derive(Debug)]
