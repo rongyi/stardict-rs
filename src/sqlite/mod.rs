@@ -1,17 +1,24 @@
 #![allow(dead_code)]
-use std::error::Error;
+use std::error;
+use std::{error::Error, rc::Rc};
 
+use inquire::autocompletion::Replacement;
+use inquire::Autocomplete;
+use inquire::CustomUserError;
+use inquire::InquireError;
 use rusqlite::{params, Connection};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Db {
-    conn: Connection,
+    conn: Rc<Connection>,
 }
 
 impl Db {
     pub fn new(file_path: &str) -> Result<Self, Box<dyn Error>> {
         let conn = Connection::open(file_path)?;
-        Ok(Self { conn })
+        Ok(Self {
+            conn: Rc::new(conn),
+        })
     }
 
     pub fn create_table(&mut self) -> Result<(), Box<dyn Error>> {
@@ -64,5 +71,26 @@ impl Db {
         }
 
         Ok(meaning)
+    }
+}
+
+impl Autocomplete for Db {
+    fn get_completion(
+        &mut self,
+        _input: &str,
+        highlighted_suggestion: Option<String>,
+    ) -> Result<inquire::autocompletion::Replacement, inquire::CustomUserError> {
+        Ok(match highlighted_suggestion {
+            Some(suggestion) => Replacement::Some(suggestion),
+            None => Replacement::None,
+        })
+    }
+    fn get_suggestions(&mut self, input: &str) -> Result<Vec<String>, CustomUserError> {
+        if input.len() <= 3 {
+            return Ok(vec![input.to_string()]);
+        }
+        Ok(self
+            .get_candidate(input)
+            .map_err(|_| Box::new(InquireError::NotTTY))?)
     }
 }

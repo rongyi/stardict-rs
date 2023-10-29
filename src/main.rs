@@ -2,6 +2,7 @@ mod parser;
 mod sqlite;
 
 use crate::sqlite::Db;
+use inquire::Text;
 use std::error::Error;
 
 fn dump_stardict() -> Result<(), Box<dyn Error>> {
@@ -25,7 +26,18 @@ fn dump_stardict() -> Result<(), Box<dyn Error>> {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    dump_stardict()?;
+    let mut db = Db::new("./test.db")?;
+    let word = Text::new(">")
+        .with_autocomplete(db.clone())
+        .with_help_message("search word")
+        .prompt();
+    match word {
+        Ok(word) => {
+            let meaning = db.get_meaning(&word)?;
+            println!("{}", meaning);
+        }
+        Err(e) => eprintln!("{}", e),
+    }
 
     Ok(())
 }
