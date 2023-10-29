@@ -27,17 +27,20 @@ fn dump_stardict() -> Result<(), Box<dyn Error>> {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut db = Db::new("./test.db")?;
-    let word = Text::new(">")
-        .with_autocomplete(db.clone())
-        .with_help_message("search word")
-        .prompt();
-    match word {
-        Ok(word) => {
-            let meaning = db.get_meaning(&word)?;
-            println!("{}", meaning);
+    loop {
+        let word = Text::new(">")
+            .with_autocomplete(db.clone())
+            .with_help_message("search word")
+            .prompt();
+        match word {
+            Ok(word) => {
+                if word == "exit" {
+                    break Ok(());
+                }
+                let meaning = db.get_meaning(&word)?;
+                println!("{}", meaning);
+            }
+            Err(e) => eprintln!("{}", e),
         }
-        Err(e) => eprintln!("{}", e),
     }
-
-    Ok(())
 }
